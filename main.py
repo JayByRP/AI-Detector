@@ -168,13 +168,17 @@ class AIDetectorBot(discord.Client):
     async def check_originality(self, text: str) -> float:
         """Check text using Originality.ai API"""
         try:
+            payload = {
+                'content': text,  # Change if "content" is not the correct key
+            }
+
             async with self.session.post(
                 'https://api.originality.ai/api/v1/scan/ai',
                 headers={
                     'X-OAI-API-KEY': self.originality_api_key,
                     'Content-Type': 'application/json'
                 },
-                json={'content': text},
+                json=payload,
                 timeout=10
             ) as response:
                 if response.status == 200:
@@ -185,13 +189,21 @@ class AIDetectorBot(discord.Client):
                         logger.info(f"Originality.ai API score: {score}")
                         return score
                     else:
-                        logger.warning("Originality.ai API request failed")
+                        logger.warning("Originality.ai API request failed. Check JSON structure and API response.")
                         return 0
-                logger.warning(f"Originality.ai API returned status {response.status}")
-                return 0
+                else:
+                    logger.warning(f"Originality.ai API returned status {response.status}")
+                    logger.warning(f"Response content: {await response.text()}")
+                    return 0
+        except aiohttp.ClientResponseError as cre:
+            logger.error(f"Response error with Originality.ai API: {cre.status} - {cre.message}")
+        except aiohttp.ClientConnectionError as cce:
+            logger.error("Connection error with Originality.ai API")
+        except aiohttp.ClientError as e:
+            logger.error(f"An error occurred while calling Originality.ai API: {e}")
         except Exception as e:
-            logger.error(f"Originality.ai API error: {e}")
-            return 0
+            logger.error(f"Unhandled error in check_originality: {e}")
+        return 0
 
     async def alert_moderators(self, message: discord.Message, score: float, analysis_details: List[str]):
         """Send alert to moderators about potential AI content"""
