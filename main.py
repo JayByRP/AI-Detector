@@ -42,9 +42,8 @@ class AIDetectorBot(discord.Client):
         #self.ignored_users = {431544605209788416, 742638883308568616}
         self.ignored_users = {431544605209788416}
         
-        # API keys
-        self.writer_api_key = os.getenv('WRITER_API_KEY')
-        self.sapling_api_key = os.getenv('SAPLING_API_KEY')
+        # API key
+        self.originality_api_key = os.getenv('ORIGINALITY_API_KEY')
         
         # Rate limiting
         self.cooldowns = defaultdict(lambda: datetime.now() - timedelta(minutes=10))
@@ -131,7 +130,7 @@ class AIDetectorBot(discord.Client):
             logger.error(f"Error processing message: {e}", exc_info=True)
 
     async def analyze_message(self, message: discord.Message) -> Tuple[float, List[str]]:
-        """Analyze message using multiple AI detection services"""
+        """Analyze message using Originality.ai API"""
         if len(message.content) < self.min_chars:
             logger.debug(f"Message too short: {len(message.content)} chars")
             return 0, []
@@ -148,88 +147,50 @@ class AIDetectorBot(discord.Client):
         
         logger.info(f"Analyzing message {message.id} from user {message.author.name}")
         
-        analysis_details = []
-        tasks = []
-        service_names = []
-        
-        if self.writer_api_key:
-            tasks.append(self.check_writer(message.content))
-            service_names.append("Writer")
-        if self.sapling_api_key:
-            tasks.append(self.check_sapling(message.content))
-            service_names.append("Sapling")
+        try:
+            score = await self.check_originality(message.content)
+            if score > 0:
+                analysis = [f"Originality.ai Score: {score:.1f}%"]
+                
+                # Update cooldown and processed messages
+                self.cooldowns[author_id] = datetime.now()
+                self.processed_messages.add(message.id)
+                
+                logger.info(f"Final score for message {message.id}: {score:.1f}%")
+                return score, analysis
+            
+            return 0, ["No valid results from AI detection service"]
+            
+        except Exception as e:
+            logger.error(f"Error analyzing message: {e}")
+            return 0, ["Error analyzing message"]
 
-        if not tasks:
-            logger.error("No API keys configured")
-            return 0, ["No AI detection services available"]
-
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        valid_scores = []
-        for i, result in enumerate(results):
-            if isinstance(result, Exception):
-                logger.error(f"{service_names[i]} error: {result}")
-                continue
-            if isinstance(result, (int, float)) and result > 0:
-                valid_scores.append(result)
-                analysis_details.append(f"{service_names[i]}: {result:.1f}%")
-
-        if not valid_scores:
-            logger.warning("No valid results from AI detection services")
-            return 0, ["No valid results from AI detection services"]
-
-        # Update cooldown and processed messages
-        self.cooldowns[author_id] = datetime.now()
-        self.processed_messages.add(message.id)
-        
-        final_score = sum(valid_scores) / len(valid_scores)
-        logger.info(f"Final score for message {message.id}: {final_score:.1f}%")
-        return final_score, analysis_details
-
-    async def check_writer(self, text: str) -> float:
-        """Check text using Writer.com's AI detection API"""
+    async def check_originality(self, text: str) -> float:
+        """Check text using Originality.ai API"""
         try:
             async with self.session.post(
-                'https://enterprise-api.writer.com/content/detect',
+                'https://api.originality.ai/api/v1/scan/ai',
                 headers={
-                    'Authorization': f'Bearer {self.writer_api_key}',
+                    'X-OAI-API-KEY': self.originality_api_key,
                     'Content-Type': 'application/json'
                 },
-                json={'text': text},
+                json={'content': text},
                 timeout=10
             ) as response:
                 if response.status == 200:
                     data = await response.json()
-                    score = float(data.get('ai_content_score', 0))
-                    logger.info(f"Writer API score: {score}")
-                    return score
-                logger.warning(f"Writer API returned status {response.status}")
+                    if data.get('success'):
+                        # Convert AI score to percentage
+                        score = float(data['score']['ai']) * 100
+                        logger.info(f"Originality.ai API score: {score}")
+                        return score
+                    else:
+                        logger.warning("Originality.ai API request failed")
+                        return 0
+                logger.warning(f"Originality.ai API returned status {response.status}")
                 return 0
         except Exception as e:
-            logger.error(f"Writer API error: {e}")
-            return 0
-
-    async def check_sapling(self, text: str) -> float:
-        """Check text using Sapling's AI detection API"""
-        try:
-            async with self.session.post(
-                'https://api.sapling.ai/api/v1/aidetect',
-                headers={'Content-Type': 'application/json'},
-                json={
-                    'key': self.sapling_api_key,
-                    'text': text
-                },
-                timeout=10
-            ) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    score = float(data.get('score', 0)) * 100
-                    logger.info(f"Sapling API score: {score}")
-                    return score
-                logger.warning(f"Sapling API returned status {response.status}")
-                return 0
-        except Exception as e:
-            logger.error(f"Sapling API error: {e}")
+            logger.error(f"Originality.ai API error: {e}")
             return 0
 
     async def alert_moderators(self, message: discord.Message, score: float, analysis_details: List[str]):
@@ -252,6 +213,13 @@ class AIDetectorBot(discord.Client):
             embed.add_field(name="AI Probability", value=f"`{score:.1f}%`", inline=True)
             embed.add_field(name="Channel", value=message.channel.mention, inline=True)
             embed.add_field(name="Author", value=message.author.mention, inline=True)
+            
+            if analysis_details:
+                embed.add_field(
+                    name="Analysis Details", 
+                    value="\n".join(analysis_details),
+                    inline=False
+                )
             
             logs_channel_id = int(os.getenv('LOGS_CHANNEL_ID'))
             logs_channel = message.guild.get_channel(logs_channel_id)
