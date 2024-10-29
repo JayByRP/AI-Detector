@@ -3,11 +3,10 @@ import os
 from discord.ext import commands
 import aiohttp
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from dotenv import load_dotenv
 import asyncio
-from typing import Tuple, List, Dict
-from collections import defaultdict
+from typing import Tuple, List
 
 # Load environment variables
 load_dotenv()
@@ -44,10 +43,6 @@ class AIDetectorBot(discord.Client):
         
         # API key
         self.originality_api_key = os.getenv('ORIGINALITY_API_KEY', 'l4czk2evmo1ipn3rju0875swygh6fqd9')
-        
-        # Rate limiting
-        self.cooldowns = defaultdict(lambda: datetime.now() - timedelta(minutes=10))
-        self.cooldown_duration = timedelta(minutes=int(os.getenv('COOLDOWN_MINUTES', '5')))
         
         # Cache for processed messages
         self.processed_messages = set()
@@ -139,12 +134,6 @@ class AIDetectorBot(discord.Client):
             logger.debug(f"Message {message.id} already processed")
             return 0, []
 
-        # Check cooldown
-        author_id = message.author.id
-        if datetime.now() - self.cooldowns[author_id] < self.cooldown_duration:
-            logger.debug(f"Rate limit for user {author_id}")
-            return 0, []
-        
         logger.info(f"Analyzing message {message.id} from user {message.author.name}")
         
         try:
@@ -152,8 +141,7 @@ class AIDetectorBot(discord.Client):
             if score > 0:
                 analysis = [f"Originality.ai Score: {score:.1f}%"]
                 
-                # Update cooldown and processed messages
-                self.cooldowns[author_id] = datetime.now()
+                # Cache processed messages
                 self.processed_messages.add(message.id)
                 
                 logger.info(f"Final score for message {message.id}: {score:.1f}%")
