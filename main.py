@@ -33,8 +33,6 @@ class AIDetectorBot(commands.Bot):
         
         # Initialize API keys
         self.writer_api_key = os.getenv('WRITER_API_KEY')
-        self.originator_api_key = os.getenv('ORIGINATOR_API_KEY')
-        self.gptzero_api_key = os.getenv('GPTZERO_API_KEY')
         self.sapling_api_key = os.getenv('SAPLING_API_KEY')
         
         # Initialize session
@@ -67,25 +65,6 @@ async def check_writer(session: aiohttp.ClientSession, text: str, api_key: str) 
         logger.error(f"Writer API error: {e}")
         return 0
 
-async def check_gptzero(session: aiohttp.ClientSession, text: str, api_key: str) -> float:
-    """Check text using GPTZero's API"""
-    try:
-        async with session.post(
-            'https://api.gptzero.me/v2/predict/text',
-            headers={
-                'X-Api-Key': api_key,
-                'Content-Type': 'application/json'
-            },
-            json={'document': text}
-        ) as response:
-            if response.status == 200:
-                data = await response.json()
-                return float(data.get('documents', [{}])[0].get('average_generated_prob', 0)) * 100
-            return 0
-    except Exception as e:
-        logger.error(f"GPTZero API error: {e}")
-        return 0
-
 async def check_sapling(session: aiohttp.ClientSession, text: str, api_key: str) -> float:
     """Check text using Sapling's AI detection API"""
     try:
@@ -105,25 +84,6 @@ async def check_sapling(session: aiohttp.ClientSession, text: str, api_key: str)
         logger.error(f"Sapling API error: {e}")
         return 0
 
-async def check_originator(session: aiohttp.ClientSession, text: str, api_key: str) -> float:
-    """Check text using Originator's AI detection API"""
-    try:
-        async with session.post(
-            'https://api.originator.ai/v1/detect',
-            headers={
-                'Authorization': f'Bearer {api_key}',
-                'Content-Type': 'application/json'
-            },
-            json={'text': text}
-        ) as response:
-            if response.status == 200:
-                data = await response.json()
-                return float(data.get('ai_probability', 0)) * 100
-            return 0
-    except Exception as e:
-        logger.error(f"Originator API error: {e}")
-        return 0
-
 async def analyze_message(message: discord.Message, bot: AIDetectorBot) -> Tuple[float, List[str]]:
     """Analyze message using multiple AI detection services"""
     if len(message.content) < 50:  # Ignore very short messages
@@ -138,15 +98,9 @@ async def analyze_message(message: discord.Message, bot: AIDetectorBot) -> Tuple
     if bot.writer_api_key:
         tasks.append(check_writer(bot.session, message.content, bot.writer_api_key))
         service_names.append("Writer")
-    if bot.gptzero_api_key:
-        tasks.append(check_gptzero(bot.session, message.content, bot.gptzero_api_key))
-        service_names.append("GPTZero")
     if bot.sapling_api_key:
         tasks.append(check_sapling(bot.session, message.content, bot.sapling_api_key))
         service_names.append("Sapling")
-    if bot.originator_api_key:
-        tasks.append(check_originator(bot.session, message.content, bot.originator_api_key))
-        service_names.append("Originator")
 
     if not tasks:
         logger.error("No API keys configured")
