@@ -43,7 +43,7 @@ class AIDetectorBot(discord.Client):
         self.ignored_users = {431544605209788416}
         
         # API key
-        self.originality_api_key = os.getenv('ORIGINALITY_API_KEY')
+        self.originality_api_key = os.getenv('ORIGINALITY_API_KEY', 'l4czk2evmo1ipn3rju0875swygh6fqd9')
         
         # Rate limiting
         self.cooldowns = defaultdict(lambda: datetime.now() - timedelta(minutes=10))
