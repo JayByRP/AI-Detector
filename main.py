@@ -166,7 +166,7 @@ class AIDetectorBot(discord.Client):
             return 0, ["Error analyzing message"]
 
     async def check_originality(self, text: str) -> float:
-        """Check text using Undetectable AI API"""
+        """Check text using Undetectable AI API with enhanced error handling."""
         try:
             async with self.session.post(
                 'https://aicheck.undetectable.ai/detect',
@@ -176,27 +176,27 @@ class AIDetectorBot(discord.Client):
                 },
                 json={
                     'text': text,
-                    'key': os.getenv("UNDETECTABLE_AI_KEY")  # Fetch API key from environment
+                    'key': os.getenv("UNDETECTABLE_AI_KEY")
                 },
                 timeout=10
             ) as response:
                 if response.status == 200:
                     data = await response.json()
-                    
-                    # Parse the 'human' score directly from the response
+
+                    # Verify response format and handle errors
                     if 'human' in data:
                         human_score = float(data['human'])
-                        ai_score = 100 - human_score  # AI likelihood as a percentage
-                        logger.info(f"Undetectable AI API human score: {human_score}, AI score: {ai_score}")
+                        ai_score = 100 - human_score
+                        logger.info(f"Undetectable AI human score: {human_score}, AI score: {ai_score}")
                         return ai_score
-                    
-                    logger.warning("Unexpected response format from Undetectable AI API")
+                    else:
+                        logger.warning("Unexpected response format: 'human' key missing")
+                        return 0
+                else:
+                    logger.warning(f"API response status: {response.status}")
                     return 0
-                
-                logger.warning(f"Undetectable AI API returned status {response.status}")
-                return 0
         except Exception as e:
-            logger.error(f"Undetectable AI API error: {e}")
+            logger.error(f"API request failed with error: {e}")
             return 0
 
     async def alert_moderators(self, message: discord.Message, score: float, analysis_details: List[str]):
