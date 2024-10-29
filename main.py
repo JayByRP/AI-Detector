@@ -166,44 +166,38 @@ class AIDetectorBot(discord.Client):
             return 0, ["Error analyzing message"]
 
     async def check_originality(self, text: str) -> float:
-        """Check text using Originality.ai API"""
+        """Check text using Undetectable AI API"""
         try:
-            payload = {
-                'content': text,  # Change if "content" is not the correct key
-            }
-
             async with self.session.post(
-                'https://api.originality.ai/api/v1/scan/ai',
+                'https://aicheck.undetectable.ai/detect',
                 headers={
-                    'X-OAI-API-KEY': self.originality_api_key,
+                    'accept': 'application/json',
                     'Content-Type': 'application/json'
                 },
-                json=payload,
+                json={
+                    'text': text,
+                    'key': os.getenv("UNDETECTABLE_AI_KEY")  # Fetch API key from environment
+                },
                 timeout=10
             ) as response:
                 if response.status == 200:
                     data = await response.json()
-                    if data.get('success'):
-                        # Convert AI score to percentage
-                        score = float(data['score']['ai']) * 100
-                        logger.info(f"Originality.ai API score: {score}")
-                        return score
-                    else:
-                        logger.warning("Originality.ai API request failed. Check JSON structure and API response.")
-                        return 0
-                else:
-                    logger.warning(f"Originality.ai API returned status {response.status}")
-                    logger.warning(f"Response content: {await response.text()}")
+                    
+                    # Parse the 'human' score directly from the response
+                    if 'human' in data:
+                        human_score = float(data['human'])
+                        ai_score = 100 - human_score  # AI likelihood as a percentage
+                        logger.info(f"Undetectable AI API human score: {human_score}, AI score: {ai_score}")
+                        return ai_score
+                    
+                    logger.warning("Unexpected response format from Undetectable AI API")
                     return 0
-        except aiohttp.ClientResponseError as cre:
-            logger.error(f"Response error with Originality.ai API: {cre.status} - {cre.message}")
-        except aiohttp.ClientConnectionError as cce:
-            logger.error("Connection error with Originality.ai API")
-        except aiohttp.ClientError as e:
-            logger.error(f"An error occurred while calling Originality.ai API: {e}")
+                
+                logger.warning(f"Undetectable AI API returned status {response.status}")
+                return 0
         except Exception as e:
-            logger.error(f"Unhandled error in check_originality: {e}")
-        return 0
+            logger.error(f"Undetectable AI API error: {e}")
+            return 0
 
     async def alert_moderators(self, message: discord.Message, score: float, analysis_details: List[str]):
         """Send alert to moderators about potential AI content"""
