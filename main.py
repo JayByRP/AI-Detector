@@ -5,23 +5,15 @@ import asyncio
 import sys
 import os
 from dotenv import load_dotenv
-import statistics
 import time
 import re
-from collections import Counter
 import numpy as np
-from typing import Dict, List, Tuple
+from typing import Dict, List
 import spacy
-from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
-from textblob import TextBlob
-import torch
-from scipy.stats import entropy
-from sklearn.feature_extraction.text import TfidfVectorizer
+from transformers import pipeline, AutoTokenizer
 import nltk
 from nltk.tokenize import sent_tokenize, word_tokenize
-from nltk.util import ngrams
 from nltk.corpus import stopwords
-import json
 
 # Configure logging
 logging.basicConfig(
