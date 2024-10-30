@@ -9,6 +9,9 @@ from transformers import AutoTokenizer, AutoModel
 import numpy as np
 from dotenv import load_dotenv
 import os
+from fastapi import FastAPI
+import uvicorn
+from threading import Thread
 
 # Load environment variables
 load_dotenv()
@@ -23,6 +26,17 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+# Initialize FastAPI app
+app = FastAPI()
+
+@app.get("/")
+async def root():
+    return {"status": "alive", "message": "Bot is running"}
+
+def run_server():
+    """Run the FastAPI server in a separate thread"""
+    uvicorn.run(app, host="0.0.0.0", port=8080)
 
 class AIDetectionModel(nn.Module):
     def __init__(self, pretrained_model="bert-base-uncased"):
@@ -63,6 +77,16 @@ class AIDetectorBot(discord.Client):
         
         # Cache for processed messages
         self.processed_messages = set()
+        
+        # Start the keep-alive server
+        self.start_server()
+        
+    def start_server(self):
+        """Start the FastAPI server in a separate thread"""
+        server_thread = Thread(target=run_server)
+        server_thread.daemon = True  # Thread will exit when main program exits
+        server_thread.start()
+        logger.info("Keep-alive server started on port 8080")
         
     async def analyze_text(self, text: str) -> float:
         """Analyze text using the custom AI detection model"""
