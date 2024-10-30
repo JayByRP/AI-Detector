@@ -1,3 +1,6 @@
-discord.py
-python-dotenv
-aiohttp
+discord.py>=2.0.0
+python-dotenv>=0.19.0
+torch>=2.0.0
+transformers>=4.30.0
+numpy>=1.21.0
+logging>=0.5.1.2

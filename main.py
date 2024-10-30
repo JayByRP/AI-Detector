@@ -1,12 +1,14 @@
 import discord
-import os
-from discord.ext import commands
-import aiohttp
 import logging
 from datetime import datetime
-from dotenv import load_dotenv
 import asyncio
 from typing import Tuple, List
+import torch
+import torch.nn as nn
+from transformers import AutoTokenizer, AutoModel
+import numpy as np
+from dotenv import load_dotenv
+import os
 
 # Load environment variables
 load_dotenv()
@@ -21,6 +23,21 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+class AIDetectionModel(nn.Module):
+    def __init__(self, pretrained_model="bert-base-uncased"):
+        super().__init__()
+        self.bert = AutoModel.from_pretrained(pretrained_model)
+        self.dropout = nn.Dropout(0.1)
+        self.classifier = nn.Linear(768, 1)  # BERT base hidden size is 768
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, input_ids, attention_mask):
+        outputs = self.bert(input_ids=input_ids, attention_mask=attention_mask)
+        pooled_output = outputs.last_hidden_state[:, 0, :]  # Use CLS token
+        pooled_output = self.dropout(pooled_output)
+        logits = self.classifier(pooled_output)
+        return self.sigmoid(logits)
 
 class AIDetectorBot(discord.Client):
     def __init__(self):
@@ -37,51 +54,39 @@ class AIDetectorBot(discord.Client):
         self.alert_threshold = float(os.getenv('ALERT_THRESHOLD', '70'))
         self.min_chars = int(os.getenv('MIN_CHARS', '50'))
         
-        # Ignored user IDs
-        #self.ignored_users = {431544605209788416, 742638883308568616}
-        self.ignored_users = {431544605209788416}
-        
-        # API key
-        self.originality_api_key = os.getenv('ORIGINALITY_API_KEY', 'l4czk2evmo1ipn3rju0875swygh6fqd9')
+        # Initialize AI detection model
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased')
+        self.model = AIDetectionModel()
+        self.model.to(self.device)
+        self.model.eval()  # Set to evaluation mode
         
         # Cache for processed messages
         self.processed_messages = set()
-        self.session = None
         
-        # Start the keep-alive server
-        self.bg_task = None
-
-    async def setup_hook(self):
-        """Initialize bot services"""
-        logger.info("Initializing bot services...")
-        self.session = aiohttp.ClientSession()
-        self.bg_task = self.loop.create_task(self.keep_alive())
-        logger.info(f"Monitoring categories: {self.monitored_categories}")
-        logger.info(f"Alert threshold set to {self.alert_threshold}%")
-
-    async def keep_alive(self):
-        """Keep-alive server for UptimeRobot monitoring"""
-        from aiohttp import web
-        
-        async def handle(request):
-            return web.Response(text="Bot is alive!")
-
-        app = web.Application()
-        app.router.add_get("/", handle)
-        
-        runner = web.AppRunner(app)
-        await runner.setup()
-        site = web.TCPSite(runner, '0.0.0.0', 8080)
-        await site.start()
-        logger.info("Keep-alive server started on port 8080")
-
-    async def close(self):
-        """Cleanup resources"""
-        if self.session:
-            await self.session.close()
-        if self.bg_task:
-            self.bg_task.cancel()
-        await super().close()
+    async def analyze_text(self, text: str) -> float:
+        """Analyze text using the custom AI detection model"""
+        try:
+            # Tokenize input
+            inputs = self.tokenizer(
+                text,
+                truncation=True,
+                max_length=512,
+                padding=True,
+                return_tensors='pt'
+            )
+            inputs = {k: v.to(self.device) for k, v in inputs.items()}
+            
+            # Get prediction
+            with torch.no_grad():
+                outputs = self.model(**inputs)
+                score = outputs.item() * 100  # Convert to percentage
+                
+            return score
+            
+        except Exception as e:
+            logger.error(f"Error in AI detection: {e}")
+            return 0
 
     async def on_ready(self):
         """Log when bot is ready"""
@@ -92,107 +97,44 @@ class AIDetectorBot(discord.Client):
     async def on_message(self, message: discord.Message):
         """Monitor messages in specified categories"""
         try:
-            # Skip bot messages and ignored users
-            if message.author.bot or message.author.id in self.ignored_users:
+            # Skip bot messages
+            if message.author.bot:
                 return
 
-            # Skip DMs
-            if not message.guild:
+            # Skip if not in a monitored category
+            if not message.guild or not message.channel or not message.channel.category:
                 return
-
-            # Skip if not in a channel
-            if not message.channel:
-                return
-
-            # Skip if not in a category
-            if not message.channel.category:
-                return
-
-            # Check if message is in a monitored category
+                
             category_id = message.channel.category.id
             if category_id not in self.monitored_categories:
-                logger.debug(f"Message in non-monitored category {category_id}")
                 return
 
-            logger.info(f"Processing message in category {category_id}")
+            # Skip if message too short
+            if len(message.content) < self.min_chars:
+                return
+
+            # Skip if already processed
+            if message.id in self.processed_messages:
+                return
+
+            logger.info(f"Processing message from {message.author.name}")
             
-            score, analysis = await self.analyze_message(message)
+            # Analyze message
+            score = await self.analyze_text(message.content)
             
             if score >= self.alert_threshold:
-                await self.alert_moderators(message, score, analysis)
+                await self.alert_moderators(message, score)
+                self.processed_messages.add(message.id)
                 
         except Exception as e:
             logger.error(f"Error processing message: {e}", exc_info=True)
 
-    async def analyze_message(self, message: discord.Message) -> Tuple[float, List[str]]:
-        """Analyze message using Originality.ai API"""
-        if len(message.content) < self.min_chars:
-            logger.debug(f"Message too short: {len(message.content)} chars")
-            return 0, []
-
-        if message.id in self.processed_messages:
-            logger.debug(f"Message {message.id} already processed")
-            return 0, []
-
-        logger.info(f"Analyzing message {message.id} from user {message.author.name}")
-        
-        try:
-            score = await self.check_originality(message.content)
-            if score > 0:
-                analysis = [f"Originality.ai Score: {score:.1f}%"]
-                
-                # Cache processed messages
-                self.processed_messages.add(message.id)
-                
-                logger.info(f"Final score for message {message.id}: {score:.1f}%")
-                return score, analysis
-            
-            return 0, ["No valid results from AI detection service"]
-            
-        except Exception as e:
-            logger.error(f"Error analyzing message: {e}")
-            return 0, ["Error analyzing message"]
-
-    async def check_originality(self, text: str) -> float:
-        """Check text using Undetectable AI API with enhanced error handling."""
-        try:
-            async with self.session.post(
-                'https://aicheck.undetectable.ai/detect',
-                headers={
-                    'accept': 'application/json',
-                    'Content-Type': 'application/json'
-                },
-                json={
-                    'text': text,
-                    'key': os.getenv("UNDETECTABLE_AI_KEY")
-                },
-                timeout=10
-            ) as response:
-                if response.status == 200:
-                    data = await response.json()
-
-                    # Verify response format and handle errors
-                    if 'human' in data:
-                        human_score = float(data['human'])
-                        ai_score = 100 - human_score
-                        logger.info(f"Undetectable AI human score: {human_score}, AI score: {ai_score}")
-                        return ai_score
-                    else:
-                        logger.warning("Unexpected response format: 'human' key missing")
-                        return 0
-                else:
-                    logger.warning(f"API response status: {response.status}")
-                    return 0
-        except Exception as e:
-            logger.error(f"API request failed with error: {e}")
-            return 0
-
-    async def alert_moderators(self, message: discord.Message, score: float, analysis_details: List[str]):
+    async def alert_moderators(self, message: discord.Message, score: float):
         """Send alert to moderators about potential AI content"""
         try:
             embed = discord.Embed(
                 title="🤖 Potential AI-Generated Content Detected",
-                color=0x800000,  # Dark red/burgundy color
+                color=0x800000,
                 timestamp=datetime.utcnow()
             )
             
@@ -207,13 +149,6 @@ class AIDetectorBot(discord.Client):
             embed.add_field(name="AI Probability", value=f"`{score:.1f}%`", inline=True)
             embed.add_field(name="Channel", value=message.channel.mention, inline=True)
             embed.add_field(name="Author", value=message.author.mention, inline=True)
-            
-            if analysis_details:
-                embed.add_field(
-                    name="Analysis Details", 
-                    value="\n".join(analysis_details),
-                    inline=False
-                )
             
             logs_channel_id = int(os.getenv('LOGS_CHANNEL_ID'))
             logs_channel = message.guild.get_channel(logs_channel_id)
