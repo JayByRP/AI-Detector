@@ -70,7 +70,8 @@ class NarrativeAIDetector:
             ],
             'stock_phrases': [
                 r'\b(without\sa\sword|in\sthe\sblink\sof\san\seye)\b',
-                r'\b(heart\sskipped\sa\sbeat|breath\scaught\sin\s(?:his|her|their)\sthroat)\b'
+                r'\b(heart\sskipped\sa\sbeat|breath\scaught\sin\s(?:his|her|their)\sthroat)\b',
+                r'\b(in\sthe\scontext\sof\b)'
             ],
             'dialogue_markers': [
                 r'\".*?\"\s*(?:he|she|they)\s*(?:said|replied|answered|asked)',
@@ -83,6 +84,12 @@ class NarrativeAIDetector:
             'overused_transitions': [
                 r'\b(meanwhile|however|moreover|furthermore)\b',
                 r'\b(in\sthat\smoment|at\sthat\stime|just\sthen)\b'
+            ],
+            'descriptive_adjectives_and_verbs': [
+                r'\b(delve|testament|dynamic|important\sto\sconsider|dive\sinto|moreover|tapestry|'
+                r'additionally|realm|remember\sthat|vibrant|vital|arguably|certainly|elevate|'
+                r'explore|in\ssummary|it\sis\sworth\snoting|notably|transformative|accordingly|'
+                r'commendable|comprehensive|embrace)\b'
             ]
         }
 
