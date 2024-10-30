@@ -2,7 +2,9 @@ services:
   - type: web
     name: discord-ai-detector
     env: python
-    buildCommand: chmod +x build.sh && ./build.sh
+    buildCommand: |
+      apt-get update && apt-get install -y openjdk-11-jre-headless
+      chmod +x build.sh && ./build.sh
     startCommand: python main.py
     envVars:
       - key: PYTHON_VERSION
