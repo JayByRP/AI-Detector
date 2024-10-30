@@ -2,9 +2,11 @@ import discord
 import logging
 from datetime import datetime
 import asyncio
+import sys
 import os
 from dotenv import load_dotenv
 import statistics
+import time
 import re
 from collections import Counter
 import numpy as np
@@ -24,41 +26,34 @@ import language_tool_python
 import json
 import pickle
 
-# Configure logging
+# Configure logging for Render
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('bot.log'),
-        logging.StreamHandler()
-    ]
+    stream=sys.stdout  # Ensure logs go to stdout for Render
 )
 logger = logging.getLogger(__name__)
 
-# Download required NLTK data
-nltk.download('punkt')
-nltk.download('stopwords')
-nltk.download('averaged_perceptron_tagger')
-
 class AdvancedAIDetector:
     def __init__(self):
-        # Initialize NLP components
-        self.nlp = spacy.load('en_core_web_sm')
-        self.language_tool = language_tool_python.LanguageTool('en-US')
-        
-        # Load pre-trained transformer model for perplexity
-        self.tokenizer = AutoTokenizer.from_pretrained('gpt2')
-        
-        # Initialize sentiment analyzer
-        self.sentiment_analyzer = pipeline('sentiment-analysis', 
-                                        model='distilbert-base-uncased-finetuned-sst-2-english',
-                                        device=0 if torch.cuda.is_available() else -1)
-        
-        # Load stylometric features
-        self.tfidf = TfidfVectorizer(max_features=1000)
-        
-        # Initialize thresholds
-        self.load_thresholds()
+        try:
+            # Initialize NLP components
+            self.nlp = spacy.load('en_core_web_sm')
+            logger.info("Loaded spaCy model successfully")
+            
+            # Initialize other components
+            self.language_tool = language_tool_python.LanguageTool('en-US')
+            self.tokenizer = AutoTokenizer.from_pretrained('gpt2')
+            self.sentiment_analyzer = pipeline('sentiment-analysis', 
+                                            model='distilbert-base-uncased-finetuned-sst-2-english',
+                                            device=-1)  # Force CPU for Render
+            self.tfidf = TfidfVectorizer(max_features=1000)
+            self.load_thresholds()
+            
+            logger.info("AI Detector initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize AI Detector: {e}")
+            raise
         
     def load_thresholds(self):
         """Load or initialize detection thresholds"""
@@ -350,4 +345,7 @@ async def main():
         raise
 
 if __name__ == "__main__":
+    # Add startup delay for services to initialize
+    logger.info("Starting bot with initialization delay...")
+    time.sleep(5)  # Give services time to start
     asyncio.run(main())

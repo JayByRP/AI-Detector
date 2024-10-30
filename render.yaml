@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: discord-ai-detector
+    env: python
+    buildCommand: chmod +x build.sh && ./build.sh
+    startCommand: python main.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: DISCORD_TOKEN
+        sync: false
+      - key: LOGS_CHANNEL_ID
+        sync: false
+      - key: MONITORED_CATEGORY_IDS
+        sync: false
+      - key: ALERT_THRESHOLD
+        value: 70
+      - key: MIN_CHARS
+        value: 50
+      - key: DEBUG_MODE
+        value: false
