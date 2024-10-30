@@ -2,13 +2,11 @@ import discord
 import logging
 from datetime import datetime
 import asyncio
-from typing import Tuple, List
 import torch
 import torch.nn as nn
-from transformers import AutoTokenizer, AutoModel
-import numpy as np
-from dotenv import load_dotenv
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import os
+from dotenv import load_dotenv
 from fastapi import FastAPI
 import uvicorn
 from threading import Thread
@@ -38,21 +36,6 @@ def run_server():
     """Run the FastAPI server in a separate thread"""
     uvicorn.run(app, host="0.0.0.0", port=8080)
 
-class AIDetectionModel(nn.Module):
-    def __init__(self, pretrained_model="bert-base-uncased"):
-        super().__init__()
-        self.bert = AutoModel.from_pretrained(pretrained_model)
-        self.dropout = nn.Dropout(0.1)
-        self.classifier = nn.Linear(768, 1)  # BERT base hidden size is 768
-        self.sigmoid = nn.Sigmoid()
-
-    def forward(self, input_ids, attention_mask):
-        outputs = self.bert(input_ids=input_ids, attention_mask=attention_mask)
-        pooled_output = outputs.last_hidden_state[:, 0, :]  # Use CLS token
-        pooled_output = self.dropout(pooled_output)
-        logits = self.classifier(pooled_output)
-        return self.sigmoid(logits)
-
 class AIDetectorBot(discord.Client):
     def __init__(self):
         intents = discord.Intents.default()
@@ -70,8 +53,12 @@ class AIDetectorBot(discord.Client):
         
         # Initialize AI detection model
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased')
-        self.model = AIDetectionModel()
+        
+        # Load pre-trained model for AI detection
+        # Using roberta-base-openai-detector as it's specifically trained for AI text detection
+        model_name = "roberta-base-openai-detector"
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.model = AutoModelForSequenceClassification.from_pretrained(model_name)
         self.model.to(self.device)
         self.model.eval()  # Set to evaluation mode
         
@@ -84,12 +71,12 @@ class AIDetectorBot(discord.Client):
     def start_server(self):
         """Start the FastAPI server in a separate thread"""
         server_thread = Thread(target=run_server)
-        server_thread.daemon = True  # Thread will exit when main program exits
+        server_thread.daemon = True
         server_thread.start()
         logger.info("Keep-alive server started on port 8080")
         
     async def analyze_text(self, text: str) -> float:
-        """Analyze text using the custom AI detection model"""
+        """Analyze text using the pre-trained AI detection model"""
         try:
             # Tokenize input
             inputs = self.tokenizer(
@@ -98,15 +85,15 @@ class AIDetectorBot(discord.Client):
                 max_length=512,
                 padding=True,
                 return_tensors='pt'
-            )
-            inputs = {k: v.to(self.device) for k, v in inputs.items()}
+            ).to(self.device)
             
             # Get prediction
             with torch.no_grad():
                 outputs = self.model(**inputs)
-                score = outputs.item() * 100  # Convert to percentage
+                probs = torch.softmax(outputs.logits, dim=-1)
+                ai_score = probs[0][1].item() * 100  # Convert to percentage
                 
-            return score
+            return ai_score
             
         except Exception as e:
             logger.error(f"Error in AI detection: {e}")
