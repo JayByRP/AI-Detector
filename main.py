@@ -14,6 +14,7 @@ from transformers import pipeline, AutoTokenizer
 import nltk
 from nltk.tokenize import sent_tokenize, word_tokenize
 from nltk.corpus import stopwords
+from aiohttp import web
 
 # Configure logging
 logging.basicConfig(
@@ -22,6 +23,15 @@ logging.basicConfig(
     stream=sys.stdout
 )
 logger = logging.getLogger(__name__)
+
+# Add health check routes
+async def health_check(request):
+    """Simple health check endpoint"""
+    return web.Response(text="OK", status=200)
+
+# Create web app for health checks
+app = web.Application()
+app.router.add_get('/health', health_check)
 
 class NarrativeAIDetector:
     def __init__(self):
@@ -93,12 +103,12 @@ class NarrativeAIDetector:
         
         # Analyze dialogue patterns
         dialogue_count = len(re.findall(r'\".*?\"', text))
-        dialogue_ratio = dialogue_count / len(sent_tokenize(text))
+        dialogue_ratio = dialogue_count / len(sent_tokenize(text)) if len(sent_tokenize(text)) > 0 else 0
         
         # Analyze descriptive language
         descriptive_words = len([token for token in doc 
                                if token.pos_ in ['ADJ', 'ADV']])
-        description_density = descriptive_words / len(doc)
+        description_density = descriptive_words / len(doc) if len(doc) > 0 else 0
         
         # Analyze character references
         character_mentions = len([ent for ent in doc.ents 
@@ -118,7 +128,7 @@ class NarrativeAIDetector:
             matches = 0
             for pattern in patterns:
                 matches += len(re.findall(pattern, text, re.IGNORECASE))
-            pattern_scores[category] = matches / len(text.split())
+            pattern_scores[category] = matches / len(text.split()) if len(text.split()) > 0 else 0
             
         return pattern_scores
 
@@ -127,19 +137,24 @@ class NarrativeAIDetector:
         words = word_tokenize(text.lower())
         
         # Vocabulary richness
-        unique_words = len(set(words)) / len(words)
+        unique_words = len(set(words)) / len(words) if len(words) > 0 else 0
         
         # Sentence variety
         sentences = sent_tokenize(text)
         sentence_lengths = [len(sent.split()) for sent in sentences]
-        sentence_variety = np.std(sentence_lengths)
+        sentence_variety = np.std(sentence_lengths) if sentence_lengths else 0
         
         # Emotional range
         emotion_scores = []
         for sent in sentences:
-            sentiment = self.sentiment_analyzer(sent)[0]
-            emotion_scores.append(1.0 if sentiment['label'] == 'POSITIVE' else 0.0)
-        emotional_range = np.std(emotion_scores)
+            try:
+                sentiment = self.sentiment_analyzer(sent)[0]
+                emotion_scores.append(1.0 if sentiment['label'] == 'POSITIVE' else 0.0)
+            except Exception as e:
+                logger.error(f"Error in sentiment analysis: {e}")
+                continue
+        
+        emotional_range = np.std(emotion_scores) if emotion_scores else 0
         
         return {
             'vocabulary_richness': unique_words,
@@ -306,9 +321,22 @@ class AIDetectorBot(discord.Client):
         except Exception as e:
             logger.error(f"Failed to send alert: {e}")
 
+async def start_webserver():
+    """Start the webserver for health checks"""
+    port = int(os.getenv('PORT', 10000))
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    logger.info(f"Health check webserver started on port {port}")
+
 async def main():
     """Main entry point"""
     try:
+        # Start the webserver
+        await start_webserver()
+        
+        # Start the bot
         bot = AIDetectorBot()
         async with bot:
             await bot.start(os.getenv('DISCORD_TOKEN'))
