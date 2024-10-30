@@ -17,198 +17,184 @@ from textblob import TextBlob
 import torch
 from scipy.stats import entropy
 from sklearn.feature_extraction.text import TfidfVectorizer
-import joblib
 import nltk
 from nltk.tokenize import sent_tokenize, word_tokenize
 from nltk.util import ngrams
 from nltk.corpus import stopwords
-import language_tool_python
 import json
-import pickle
 
-# Configure logging for Render
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
-    stream=sys.stdout  # Ensure logs go to stdout for Render
+    stream=sys.stdout
 )
 logger = logging.getLogger(__name__)
 
-class AdvancedAIDetector:
+class NarrativeAIDetector:
     def __init__(self):
         try:
             # Initialize NLP components
             self.nlp = spacy.load('en_core_web_sm')
             logger.info("Loaded spaCy model successfully")
             
-            # Initialize other components
-            self.language_tool = language_tool_python.LanguageTool('en-US')
+            # Initialize transformers
             self.tokenizer = AutoTokenizer.from_pretrained('gpt2')
             self.sentiment_analyzer = pipeline('sentiment-analysis', 
                                             model='distilbert-base-uncased-finetuned-sst-2-english',
-                                            device=-1)  # Force CPU for Render
-            self.tfidf = TfidfVectorizer(max_features=1000)
+                                            device=-1)
+            
+            # Initialize NLTK
+            nltk.download('punkt', quiet=True)
+            nltk.download('stopwords', quiet=True)
+            self.stop_words = set(stopwords.words('english'))
+            
+            # Initialize creative writing patterns
+            self.narrative_patterns = self.load_narrative_patterns()
             self.load_thresholds()
             
-            logger.info("AI Detector initialized successfully")
+            logger.info("Narrative AI Detector initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize AI Detector: {e}")
             raise
-        
-    def load_thresholds(self):
-        """Load or initialize detection thresholds"""
-        try:
-            with open('thresholds.json', 'r') as f:
-                self.thresholds = json.load(f)
-        except FileNotFoundError:
-            self.thresholds = {
-                'entropy_threshold': 4.2,
-                'perplexity_threshold': 50.0,
-                'coherence_threshold': 0.7,
-                'repetition_threshold': 0.3,
-                'grammar_threshold': 0.8,
-                'sentiment_variance_threshold': 0.2
-            }
-    
-    def calculate_perplexity(self, text: str) -> float:
-        """Calculate text perplexity using GPT-2 tokenizer"""
-        try:
-            tokens = self.tokenizer.encode(text, return_tensors='pt')
-            token_probs = torch.softmax(tokens, dim=-1)
-            return float(-torch.mean(torch.log(token_probs)))
-        except Exception as e:
-            logging.error(f"Perplexity calculation error: {e}")
-            return 0.0
 
-    def analyze_grammar(self, text: str) -> Tuple[float, List[str]]:
-        """Analyze grammar and writing style"""
-        matches = self.language_tool.check(text)
-        error_density = len(matches) / len(text.split())
-        error_types = [match.ruleId for match in matches]
-        return error_density, error_types
-
-    def calculate_coherence(self, text: str) -> float:
-        """Calculate text coherence using NLP analysis"""
-        doc = self.nlp(text)
-        
-        # Analyze sentence transitions
-        coherence_scores = []
-        prev_sent = None
-        
-        for sent in doc.sents:
-            if prev_sent is not None:
-                # Calculate similarity between consecutive sentences
-                similarity = prev_sent.similarity(sent)
-                coherence_scores.append(similarity)
-            prev_sent = sent
-            
-        return np.mean(coherence_scores) if coherence_scores else 0.0
-
-    def analyze_stylometric_features(self, text: str) -> Dict[str, float]:
-        """Extract stylometric features from text"""
-        doc = self.nlp(text)
-        
-        # Calculate various stylometric metrics
-        word_lengths = [len(token.text) for token in doc if not token.is_punct]
-        sentence_lengths = [len(sent.text.split()) for sent in doc.sents]
-        
-        # POS tag distribution
-        pos_dist = Counter([token.pos_ for token in doc])
-        pos_entropy = entropy(list(pos_dist.values()))
-        
-        # Lexical density
-        content_words = len([token for token in doc if not token.is_stop])
-        total_words = len([token for token in doc if not token.is_punct])
-        lexical_density = content_words / total_words if total_words > 0 else 0
-        
+    def load_narrative_patterns(self) -> Dict[str, List[str]]:
+        """Load patterns common in AI-generated creative writing"""
         return {
-            'avg_word_length': np.mean(word_lengths),
-            'word_length_variance': np.var(word_lengths),
-            'avg_sentence_length': np.mean(sentence_lengths),
-            'sentence_length_variance': np.var(sentence_lengths),
-            'pos_entropy': pos_entropy,
-            'lexical_density': lexical_density
+            'generic_descriptions': [
+                r'\b(suddenly|slowly|quickly|immediately)\b',
+                r'\b(beautiful|handsome|gorgeous|stunning)\b',
+                r'\b(smiled|grinned|smirked|frowned)\b'
+            ],
+            'stock_phrases': [
+                r'\b(without\sa\sword|in\sthe\sblink\sof\san\seye)\b',
+                r'\b(heart\sskipped\sa\sbeat|breath\scaught\sin\s(?:his|her|their)\sthroat)\b'
+            ],
+            'dialogue_markers': [
+                r'\".*?\"\s*(?:he|she|they)\s*(?:said|replied|answered|asked)',
+                r'\b(?:exclaimed|declared|proclaimed|announced)\b'
+            ],
+            'repetitive_patterns': [
+                r'(\b\w+\b)(\s+\1\b){2,}',
+                r'\b(felt|experienced|sensed)\b.*?\b(emotion|feeling)\b'
+            ],
+            'overused_transitions': [
+                r'\b(meanwhile|however|moreover|furthermore)\b',
+                r'\b(in\sthat\smoment|at\sthat\stime|just\sthen)\b'
+            ]
         }
 
-    def calculate_sentiment_variance(self, text: str) -> float:
-        """Calculate variance in sentiment across sentences"""
-        sentences = sent_tokenize(text)
-        if len(sentences) < 2:
-            return 0.0
-            
-        sentiments = []
-        for sent in sentences:
-            sentiment = self.sentiment_analyzer(sent)[0]
-            sentiment_score = 1.0 if sentiment['label'] == 'POSITIVE' else 0.0
-            sentiments.append(sentiment_score)
-            
-        return np.var(sentiments)
+    def load_thresholds(self):
+        """Initialize detection thresholds for narrative content"""
+        self.thresholds = {
+            'entropy_threshold': 4.5,           # Higher for creative writing
+            'perplexity_threshold': 60.0,       # Adjusted for narrative complexity
+            'coherence_threshold': 0.65,        # Slightly lower for creative flow
+            'pattern_threshold': 0.4,           # Adjusted for narrative style
+            'dialogue_ratio_threshold': 0.3,    # Expected dialogue presence
+            'description_density_threshold': 0.25
+        }
 
-    def detect_repetitive_patterns(self, text: str) -> Dict[str, float]:
-        """Detect repetitive patterns and phrases"""
+    def analyze_narrative_style(self, text: str) -> Dict[str, float]:
+        """Analyze narrative writing style markers"""
+        doc = self.nlp(text)
+        
+        # Analyze dialogue patterns
+        dialogue_count = len(re.findall(r'\".*?\"', text))
+        dialogue_ratio = dialogue_count / len(sent_tokenize(text))
+        
+        # Analyze descriptive language
+        descriptive_words = len([token for token in doc 
+                               if token.pos_ in ['ADJ', 'ADV']])
+        description_density = descriptive_words / len(doc)
+        
+        # Analyze character references
+        character_mentions = len([ent for ent in doc.ents 
+                                if ent.label_ == 'PERSON'])
+        
+        return {
+            'dialogue_ratio': dialogue_ratio,
+            'description_density': description_density,
+            'character_count': character_mentions
+        }
+
+    def detect_ai_patterns(self, text: str) -> Dict[str, float]:
+        """Detect AI patterns in narrative writing"""
+        pattern_scores = {}
+        
+        for category, patterns in self.narrative_patterns.items():
+            matches = 0
+            for pattern in patterns:
+                matches += len(re.findall(pattern, text, re.IGNORECASE))
+            pattern_scores[category] = matches / len(text.split())
+            
+        return pattern_scores
+
+    def calculate_creativity_metrics(self, text: str) -> Dict[str, float]:
+        """Calculate metrics specific to creative writing"""
         words = word_tokenize(text.lower())
         
-        # Calculate n-gram repetition for different n
-        repetition_scores = {}
-        for n in range(2, 5):
-            ngram_list = list(ngrams(words, n))
-            if ngram_list:
-                ngram_freq = Counter(ngram_list)
-                max_freq = max(ngram_freq.values())
-                repetition_scores[f'{n}-gram_repetition'] = max_freq / len(ngram_list)
-                
-        return repetition_scores
+        # Vocabulary richness
+        unique_words = len(set(words)) / len(words)
+        
+        # Sentence variety
+        sentences = sent_tokenize(text)
+        sentence_lengths = [len(sent.split()) for sent in sentences]
+        sentence_variety = np.std(sentence_lengths)
+        
+        # Emotional range
+        emotion_scores = []
+        for sent in sentences:
+            sentiment = self.sentiment_analyzer(sent)[0]
+            emotion_scores.append(1.0 if sentiment['label'] == 'POSITIVE' else 0.0)
+        emotional_range = np.std(emotion_scores)
+        
+        return {
+            'vocabulary_richness': unique_words,
+            'sentence_variety': sentence_variety,
+            'emotional_range': emotional_range
+        }
 
     def analyze_text(self, text: str) -> Dict[str, float]:
-        """Comprehensive text analysis using multiple detection methods"""
+        """Comprehensive narrative text analysis"""
         try:
-            # Basic text preprocessing
             text = text.strip()
             if not text:
                 return {'ai_score': 0.0}
 
-            # Calculate all metrics
-            perplexity = self.calculate_perplexity(text)
-            coherence = self.calculate_coherence(text)
-            grammar_density, error_types = self.analyze_grammar(text)
-            sentiment_variance = self.calculate_sentiment_variance(text)
-            stylometric_features = self.analyze_stylometric_features(text)
-            repetition_patterns = self.detect_repetitive_patterns(text)
+            # Narrative-specific analysis
+            narrative_style = self.analyze_narrative_style(text)
+            pattern_scores = self.detect_ai_patterns(text)
+            creativity_metrics = self.calculate_creativity_metrics(text)
             
-            # Combine all features for final scoring
+            # Calculate feature scores
             feature_scores = {
-                'perplexity_score': min(1.0, perplexity / self.thresholds['perplexity_threshold']),
-                'coherence_score': coherence / self.thresholds['coherence_threshold'],
-                'grammar_score': 1.0 - (grammar_density / self.thresholds['grammar_threshold']),
-                'sentiment_variance_score': sentiment_variance / self.thresholds['sentiment_variance_threshold'],
-                'repetition_score': max(repetition_patterns.values()) if repetition_patterns else 0.0
+                'dialogue_score': min(1.0, narrative_style['dialogue_ratio'] / self.thresholds['dialogue_ratio_threshold']),
+                'description_score': min(1.0, narrative_style['description_density'] / self.thresholds['description_density_threshold']),
+                'pattern_score': min(1.0, max(pattern_scores.values()) / self.thresholds['pattern_threshold']),
+                'creativity_score': min(1.0, creativity_metrics['vocabulary_richness'])
             }
-            
-            # Calculate weighted final score
+
+            # Weighted scoring for narrative content
             weights = {
-                'perplexity_score': 0.3,
-                'coherence_score': 0.2,
-                'grammar_score': 0.2,
-                'sentiment_variance_score': 0.15,
-                'repetition_score': 0.15
+                'dialogue_score': 0.25,
+                'description_score': 0.25,
+                'pattern_score': 0.3,
+                'creativity_score': 0.2
             }
-            
+
             ai_score = sum(score * weights[metric] for metric, score in feature_scores.items()) * 100
-            
-            # Compile detailed results
+
             return {
                 'ai_score': ai_score,
-                'perplexity': perplexity,
-                'coherence': coherence,
-                'grammar_density': grammar_density,
-                'sentiment_variance': sentiment_variance,
-                'error_types': error_types,
-                'stylometric_features': stylometric_features,
-                'repetition_patterns': repetition_patterns
+                'narrative_style': narrative_style,
+                'pattern_analysis': pattern_scores,
+                'creativity_metrics': creativity_metrics,
+                'feature_scores': feature_scores
             }
-            
+
         except Exception as e:
-            logging.error(f"Error in text analysis: {e}")
+            logger.error(f"Error in text analysis: {e}")
             return {'ai_score': 0.0}
 
 class AIDetectorBot(discord.Client):
@@ -216,42 +202,80 @@ class AIDetectorBot(discord.Client):
         intents = discord.Intents.default()
         intents.message_content = True
         super().__init__(intents=intents)
-        
-        # Initialize detector
-        self.detector = AdvancedAIDetector()
-        
-        # Load configuration
+        self.detector = NarrativeAIDetector()
         self.load_config()
-        
-        # Cache for processed messages
         self.processed_messages = set()
+        self.last_heartbeat = time.time()
         
     def load_config(self):
-        """Load bot configuration from environment variables"""
+        """Load bot configuration"""
+        load_dotenv()
         self.monitored_categories = set(
             int(cat_id) for cat_id in 
             os.getenv('MONITORED_CATEGORY_IDS', '').split(',') 
             if cat_id
         )
         self.alert_threshold = float(os.getenv('ALERT_THRESHOLD', '70'))
-        self.min_chars = int(os.getenv('MIN_CHARS', '50'))
-        self.debug_mode = os.getenv('DEBUG_MODE', 'false').lower() == 'true'
+        self.min_chars = int(os.getenv('MIN_CHARS', '100'))  # Increased for narrative content
+        self.heartbeat_interval = int(os.getenv('HEARTBEAT_INTERVAL', '300'))
+
+    async def heartbeat(self):
+        """Maintain bot uptime"""
+        while True:
+            try:
+                current_time = time.time()
+                if current_time - self.last_heartbeat >= self.heartbeat_interval:
+                    logger.info("Heartbeat: Bot is alive")
+                    self.last_heartbeat = current_time
+                await asyncio.sleep(60)
+            except Exception as e:
+                logger.error(f"Heartbeat error: {e}")
+                await asyncio.sleep(60)
 
     async def on_ready(self):
-        """Log when bot is ready"""
-        logger.info(f"Bot is ready! Logged in as {self.user.name}")
-        logger.info(f"Monitoring categories: {self.monitored_categories}")
-        logger.info(f"Alert threshold: {self.alert_threshold}%")
+        """Bot ready handler"""
+        logger.info(f"Narrative AI Detection Bot is ready! Logged in as {self.user.name}")
+        self.loop.create_task(self.heartbeat())
+
+    def create_alert_embed(self, message: discord.Message, results: Dict[str, float]) -> discord.Embed:
+        """Create detailed alert embed for narrative content"""
+        embed = discord.Embed(
+            title="🤖 Potential AI-Generated Narrative Detected",
+            color=0x800000,
+            timestamp=datetime.utcnow()
+        )
+        
+        message_link = f"https://discord.com/channels/{message.guild.id}/{message.channel.id}/{message.id}"
+        
+        embed.add_field(name="Message Link", value=f"[Click to view]({message_link})", inline=False)
+        embed.add_field(name="AI Probability", value=f"`{results['ai_score']:.1f}%`", inline=True)
+        embed.add_field(name="Channel", value=message.channel.mention, inline=True)
+        
+        # Add narrative-specific metrics
+        if 'narrative_style' in results:
+            style = results['narrative_style']
+            style_text = (f"Dialogue Ratio: `{style['dialogue_ratio']:.2f}`\n"
+                         f"Description Density: `{style['description_density']:.2f}`\n"
+                         f"Character References: `{style['character_count']}`")
+            embed.add_field(name="Writing Style", value=style_text, inline=False)
+        
+        if 'creativity_metrics' in results:
+            creativity = results['creativity_metrics']
+            creativity_text = (f"Vocabulary Richness: `{creativity['vocabulary_richness']:.2f}`\n"
+                             f"Sentence Variety: `{creativity['sentence_variety']:.2f}`\n"
+                             f"Emotional Range: `{creativity['emotional_range']:.2f}`")
+            embed.add_field(name="Creativity Analysis", value=creativity_text, inline=False)
+        
+        embed.add_field(name="Author", value=message.author.mention, inline=True)
+        
+        return embed
 
     async def on_message(self, message: discord.Message):
-        """Process new messages"""
+        """Message handler"""
         try:
             if self.should_skip_message(message):
                 return
 
-            logger.info(f"Processing message from {message.author.name}")
-            
-            # Analyze message
             results = self.detector.analyze_text(message.content)
             score = results['ai_score']
             
@@ -263,7 +287,7 @@ class AIDetectorBot(discord.Client):
             logger.error(f"Error processing message: {e}", exc_info=True)
 
     def should_skip_message(self, message: discord.Message) -> bool:
-        """Determine if message should be skipped"""
+        """Message filter for narrative content"""
         return (
             message.author.bot or
             not message.guild or
@@ -275,10 +299,9 @@ class AIDetectorBot(discord.Client):
         )
 
     async def alert_moderators(self, message: discord.Message, results: Dict[str, float]):
-        """Send detailed alert about potential AI content"""
+        """Send alerts for detected AI content"""
         try:
             embed = self.create_alert_embed(message, results)
-            
             logs_channel_id = int(os.getenv('LOGS_CHANNEL_ID'))
             logs_channel = message.guild.get_channel(logs_channel_id)
             
@@ -291,51 +314,8 @@ class AIDetectorBot(discord.Client):
         except Exception as e:
             logger.error(f"Failed to send alert: {e}")
 
-    def create_alert_embed(self, message: discord.Message, results: Dict[str, float]) -> discord.Embed:
-        """Create detailed embed for alert message"""
-        embed = discord.Embed(
-            title="🤖 Potential AI-Generated Content Detected",
-            color=0x800000,
-            timestamp=datetime.utcnow()
-        )
-        
-        message_link = f"https://discord.com/channels/{message.guild.id}/{message.channel.id}/{message.id}"
-        
-        embed.add_field(
-            name="Message Link",
-            value=f"[Click to view message]({message_link})",
-            inline=False
-        )
-        
-        embed.add_field(name="AI Probability", value=f"`{results['ai_score']:.1f}%`", inline=True)
-        embed.add_field(name="Channel", value=message.channel.mention, inline=True)
-        
-        # Add detailed metrics
-        embed.add_field(
-            name="Primary Metrics", 
-            value=f"Perplexity: `{results['perplexity']:.2f}`\n" \
-                  f"Coherence: `{results['coherence']:.2f}`\n" \
-                  f"Grammar Density: `{results['grammar_density']:.2f}`",
-            inline=False
-        )
-        
-        # Add stylometric features
-        if 'stylometric_features' in results:
-            style_metrics = results['stylometric_features']
-            embed.add_field(
-                name="Style Analysis",
-                value=f"Lexical Density: `{style_metrics['lexical_density']:.2f}`\n" \
-                      f"POS Entropy: `{style_metrics['pos_entropy']:.2f}`\n" \
-                      f"Sentence Variance: `{style_metrics['sentence_length_variance']:.2f}`",
-                inline=False
-            )
-        
-        embed.add_field(name="Author", value=message.author.mention, inline=True)
-        
-        return embed
-
 async def main():
-    """Initialize and run the bot"""
+    """Main entry point"""
     try:
         bot = AIDetectorBot()
         async with bot:
@@ -345,7 +325,5 @@ async def main():
         raise
 
 if __name__ == "__main__":
-    # Add startup delay for services to initialize
-    logger.info("Starting bot with initialization delay...")
-    time.sleep(5)  # Give services time to start
+    time.sleep(5)  # Startup delay
     asyncio.run(main())

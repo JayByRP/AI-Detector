@@ -1,10 +1,8 @@
 services:
   - type: web
-    name: discord-ai-detector
+    name: narrative-ai-detector
     env: python
-    buildCommand: |
-      apt-get update && apt-get install -y openjdk-11-jre-headless
-      chmod +x build.sh && ./build.sh
+    buildCommand: chmod +x build.sh && ./build.sh
     startCommand: python main.py
     envVars:
       - key: PYTHON_VERSION
@@ -18,6 +16,8 @@ services:
       - key: ALERT_THRESHOLD
         value: 70
       - key: MIN_CHARS
-        value: 50
-      - key: DEBUG_MODE
-        value: false
+        value: 100
+      - key: HEARTBEAT_INTERVAL
+        value: 300
+    healthCheckPath: /health
+    autoDeploy: true
