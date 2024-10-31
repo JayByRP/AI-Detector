@@ -219,6 +219,28 @@ class AIDetectorBot(discord.Client):
         self.last_heartbeat = time.time()
         logger.info("Bot initialized successfully")
 
+    async def heartbeat(self):
+        """Periodic heartbeat task to monitor bot health"""
+        while True:
+            try:
+                current_time = time.time()
+                uptime = current_time - self.last_heartbeat
+                logger.info(f"Heartbeat - Bot uptime: {uptime:.2f} seconds")
+                
+                # Log basic stats
+                logger.info(f"Connected to {len(self.guilds)} guilds")
+                logger.info(f"Processed messages: {len(self.processed_messages)}")
+                
+                # Update last heartbeat time
+                self.last_heartbeat = current_time
+                
+                # Wait for next interval
+                await asyncio.sleep(self.heartbeat_interval)
+                
+            except Exception as e:
+                logger.error(f"Error in heartbeat: {e}")
+                await asyncio.sleep(60)  # Wait a minute before retrying if there's an error
+
     def load_config(self):
         """Load bot configuration"""
         load_dotenv()
