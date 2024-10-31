@@ -217,67 +217,169 @@ class AIDetectorBot(discord.Client):
         self.load_config()
         self.processed_messages = set()
         self.last_heartbeat = time.time()
-        
+        logger.info("Bot initialized successfully")
+
     def load_config(self):
         """Load bot configuration"""
         load_dotenv()
-        self.monitored_categories = set(
-            int(cat_id) for cat_id in 
-            os.getenv('MONITORED_CATEGORY_IDS', '').split(',') 
-            if cat_id
-        )
+        
+        # Load and validate monitored categories
+        category_ids = os.getenv('MONITORED_CATEGORY_IDS', '')
+        self.monitored_categories = set()
+        if category_ids:
+            try:
+                self.monitored_categories = set(int(cat_id) for cat_id in category_ids.split(',') if cat_id.strip())
+                logger.info(f"Monitoring categories: {self.monitored_categories}")
+            except ValueError as e:
+                logger.error(f"Invalid category IDs in config: {e}")
+        else:
+            logger.warning("No category IDs configured for monitoring")
+
+        # Load other settings
         self.alert_threshold = float(os.getenv('ALERT_THRESHOLD', '70'))
         self.min_chars = int(os.getenv('MIN_CHARS', '100'))
         self.heartbeat_interval = int(os.getenv('HEARTBEAT_INTERVAL', '300'))
-
-    async def heartbeat(self):
-        """Maintain bot uptime"""
-        while True:
+        
+        # Validate logs channel
+        self.logs_channel_id = os.getenv('LOGS_CHANNEL_ID')
+        if not self.logs_channel_id:
+            logger.error("LOGS_CHANNEL_ID not configured!")
+        else:
             try:
-                current_time = time.time()
-                if current_time - self.last_heartbeat >= self.heartbeat_interval:
-                    logger.info("Heartbeat: Bot is alive")
-                    self.last_heartbeat = current_time
-                await asyncio.sleep(60)
-            except Exception as e:
-                logger.error(f"Heartbeat error: {e}")
-                await asyncio.sleep(60)
+                self.logs_channel_id = int(self.logs_channel_id)
+                logger.info(f"Logs will be sent to channel: {self.logs_channel_id}")
+            except ValueError:
+                logger.error("Invalid LOGS_CHANNEL_ID format")
+
+        logger.info(f"Configuration loaded - Alert threshold: {self.alert_threshold}, Min chars: {self.min_chars}")
 
     async def on_ready(self):
         """Bot ready handler"""
-        logger.info(f"Narrative AI Detection Bot is ready! Logged in as {self.user.name}")
+        logger.info(f"Bot is ready! Logged in as {self.user.name}")
+        logger.info(f"Connected to {len(self.guilds)} guilds")
+        
+        # Validate channels on startup
+        for guild in self.guilds:
+            logs_channel = guild.get_channel(self.logs_channel_id)
+            if logs_channel:
+                logger.info(f"Found logs channel in guild {guild.name}")
+            else:
+                logger.error(f"Logs channel not found in guild {guild.name}")
+            
+            # Log monitored categories found
+            found_categories = [cat for cat in guild.categories if cat.id in self.monitored_categories]
+            logger.info(f"Found {len(found_categories)} monitored categories in {guild.name}")
+            
         self.loop.create_task(self.heartbeat())
 
+    def should_skip_message(self, message: discord.Message) -> bool:
+        """Message filter with detailed logging"""
+        if message.author.bot:
+            logger.debug(f"Skipping bot message from {message.author.name}")
+            return True
+            
+        if not message.guild:
+            logger.debug("Skipping DM message")
+            return True
+            
+        if not message.channel or not message.channel.category:
+            logger.debug(f"Skipping message from channel without category")
+            return True
+            
+        if message.channel.category.id not in self.monitored_categories:
+            logger.debug(f"Skipping message from unmonitored category {message.channel.category.name}")
+            return True
+            
+        if len(message.content) < self.min_chars:
+            logger.debug(f"Skipping message: too short ({len(message.content)} chars)")
+            return True
+            
+        if message.id in self.processed_messages:
+            logger.debug(f"Skipping already processed message {message.id}")
+            return True
+            
+        logger.info(f"Processing message {message.id} from {message.author.name} in {message.channel.name}")
+        return False
+
+    async def on_message(self, message: discord.Message):
+        """Message handler with improved logging"""
+        try:
+            logger.debug(f"Received message: {message.id} in channel {message.channel.id if message.channel else 'N/A'}")
+            
+            if self.should_skip_message(message):
+                return
+
+            logger.info(f"Analyzing message {message.id} content length: {len(message.content)}")
+            results = self.detector.analyze_text(message.content)
+            score = results.get('ai_score', 0)
+            
+            logger.info(f"Analysis complete for message {message.id} - Score: {score:.2f}")
+            
+            if score >= self.alert_threshold:
+                logger.info(f"High AI score detected ({score:.2f}%) - sending alert")
+                await self.alert_moderators(message, results)
+                self.processed_messages.add(message.id)
+                logger.info(f"Alert sent and message {message.id} marked as processed")
+            
+        except Exception as e:
+            logger.error(f"Error processing message {message.id if message else 'N/A'}: {e}", exc_info=True)
+
+    async def alert_moderators(self, message: discord.Message, results: Dict[str, float]):
+        """Send alerts with better error handling"""
+        try:
+            embed = self.create_alert_embed(message, results)
+            logs_channel = message.guild.get_channel(self.logs_channel_id)
+            
+            if logs_channel:
+                logger.info(f"Sending alert to logs channel {logs_channel.name}")
+                await logs_channel.send(embed=embed)
+                logger.info(f"Alert sent successfully for message {message.id}")
+            else:
+                logger.error(f"Logs channel {self.logs_channel_id} not found in guild {message.guild.name}")
+                
+        except discord.Forbidden:
+            logger.error(f"Bot lacks permission to send messages in logs channel")
+        except discord.HTTPException as e:
+            logger.error(f"Failed to send alert due to Discord API error: {e}")
+        except Exception as e:
+            logger.error(f"Failed to send alert: {e}", exc_info=True)
+
     def create_alert_embed(self, message: discord.Message, results: Dict[str, float]) -> discord.Embed:
-        """Create alert embed"""
-        embed = discord.Embed(
-            title="🤖 Potential AI-Generated Content Detected",
-            color=0x800000,
-            timestamp=datetime.utcnow()
-        )
-        
-        message_link = f"https://discord.com/channels/{message.guild.id}/{message.channel.id}/{message.id}"
-        
-        embed.add_field(name="Message Link", value=f"[Click to view]({message_link})", inline=False)
-        embed.add_field(name="AI Probability", value=f"`{results['ai_score']:.1f}%`", inline=True)
-        embed.add_field(name="Channel", value=message.channel.mention, inline=True)
-        
-        if 'statistics' in results:
-            stats = results['statistics']
-            stats_text = (f"Word Count: `{stats['word_count']}`\n"
-                         f"Unique Words: `{stats['unique_word_ratio']:.2f}`\n"
-                         f"Avg Sentence Length: `{stats['avg_sentence_length']:.1f}`")
-            embed.add_field(name="Text Statistics", value=stats_text, inline=False)
-        
-        if 'style_markers' in results:
-            style = results['style_markers']
-            style_text = (f"Dialogue Ratio: `{style['dialogue_ratio']:.2f}`\n"
-                         f"Adjective Density: `{style['adjective_density']:.2f}`")
-            embed.add_field(name="Style Analysis", value=style_text, inline=False)
-        
-        embed.add_field(name="Author", value=message.author.mention, inline=True)
-        
-        return embed
+        """Create alert embed with additional information"""
+        try:
+            embed = discord.Embed(
+                title="🤖 Potential AI-Generated Content Detected",
+                color=0x800000,
+                timestamp=datetime.utcnow()
+            )
+            
+            message_link = f"https://discord.com/channels/{message.guild.id}/{message.channel.id}/{message.id}"
+            
+            embed.add_field(name="Message Link", value=f"[Click to view]({message_link})", inline=False)
+            embed.add_field(name="AI Probability", value=f"`{results['ai_score']:.1f}%`", inline=True)
+            embed.add_field(name="Confidence", value=f"`{results.get('confidence', 0):.1f}%`", inline=True)
+            embed.add_field(name="Channel", value=message.channel.mention, inline=True)
+            
+            if 'statistics' in results:
+                stats = results['statistics']
+                stats_text = (f"Word Count: `{stats['word_count']}`\n"
+                             f"Unique Words: `{stats['unique_word_ratio']:.2f}`\n"
+                             f"Avg Sentence Length: `{stats['avg_sentence_length']:.1f}`\n"
+                             f"Vocabulary Richness: `{stats['vocab_richness']:.2f}`")
+                embed.add_field(name="Text Statistics", value=stats_text, inline=False)
+            
+            if 'style_markers' in results:
+                style = results['style_markers']
+                style_text = (f"Dialogue Ratio: `{style['dialogue_ratio']:.2f}`\n"
+                             f"Style Density: `{style['style_density']:.2f}`")
+                embed.add_field(name="Style Analysis", value=style_text, inline=False)
+            
+            embed.add_field(name="Author", value=message.author.mention, inline=True)
+            
+            return embed
+        except Exception as e:
+            logger.error(f"Error creating embed: {e}", exc_info=True)
+            raise
 
     async def on_message(self, message: discord.Message):
         """Message handler"""
