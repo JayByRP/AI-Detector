@@ -16,11 +16,8 @@ python3 -m pip install --upgrade pip setuptools wheel
 # Install Python dependencies
 pip install --no-cache-dir -r requirements.txt
 
-# Download spaCy model
+# Download minimal spaCy model
 python3 -m spacy download en_core_web_sm
-
-# Download required NLTK data
-python3 -c "import nltk; nltk.download('punkt'); nltk.download('stopwords')"
 
 # Create health check endpoint
 mkdir -p public
