@@ -68,7 +68,9 @@ class LightweightNarrativeDetector:
             ],
             'stock_phrases': [
                 r'\b(without\sa\sword|in\sthe\sblink\sof\san\seye)\b',
-                r'\b(heart\sskipped\sa\sbeat|breath\scaught)\b'
+                r'\b(heart\sskipped\sa\sbeat|breath\scaught)\b',
+                r'\b(in\sthe\scontext\sof\b)',
+                r'\b(a\sshining\sbeacon\b)'
             ],
             'dialogue_markers': [
                 r'\".*?\"\s*(?:he|she|they)\s*(?:said|replied|asked)',
@@ -77,6 +79,7 @@ class LightweightNarrativeDetector:
             'ai_indicators': [
                 r'\b(delve|testament|dynamic|moreover|tapestry|realm)\b',
                 r'\b(it\sis\sworth\snoting|notably|transformative)\b'
+                r'\b(in\sintricate|vibrant|comprehensive|embrace|tantalizing|vibrant)\b'	
             ]
         }
 
@@ -84,8 +87,8 @@ class LightweightNarrativeDetector:
         """Initialize detection thresholds with more balanced values"""
         self.thresholds = {
             'pattern_density': 0.05,  # Reduced from 0.1
-            'repetition_threshold': 0.25,  # Increased from 0.15
-            'sentence_complexity': 0.3,  # Reduced from 0.4
+            'repetition_threshold': 0.4,  # Increased from 0.15
+            'sentence_complexity': 0.5,  # Reduced from 0.4
             'dialogue_ratio': 0.1,  # Decreased from 0.3
             'min_length': 50,  # Minimum text length for reliable analysis
             'max_pattern_score': 0.7  # Cap on pattern matching contribution
