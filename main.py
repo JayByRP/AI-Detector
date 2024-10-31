@@ -79,7 +79,7 @@ class LightweightNarrativeDetector:
             'pattern_density': 0.05,  # Reduced from 0.1
             'repetition_threshold': 0.25,  # Increased from 0.15
             'sentence_complexity': 0.3,  # Reduced from 0.4
-            'dialogue_ratio': 0.4,  # Increased from 0.3
+            'dialogue_ratio': 0.1,  # Decreased from 0.3
             'min_length': 50,  # Minimum text length for reliable analysis
             'max_pattern_score': 0.7  # Cap on pattern matching contribution
         }
