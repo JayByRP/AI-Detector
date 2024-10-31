@@ -35,6 +35,8 @@ class LightweightNarrativeDetector:
         try:
             # Use efficient spaCy model
             self.nlp = spacy.load('en_core_web_sm', disable=['ner', 'parser'])
+            if 'sentencizer' not in self.nlp.pipe_names:
+                self.nlp.add_pipe('sentencizer')
             logger.info("Loaded spaCy model successfully")
             
             # Initialize patterns and thresholds
