@@ -51,6 +51,13 @@ class LightweightNarrativeDetector:
             logger.error(f"Failed to initialize detector: {e}")
             raise
 
+    def compile_patterns(self) -> Dict[str, List[re.Pattern]]:
+        """Pre-compile regex patterns for efficiency"""
+        compiled = {}
+        for category, patterns in self.narrative_patterns.items():
+            compiled[category] = [re.compile(pattern, re.IGNORECASE) for pattern in patterns]
+        return compiled
+
     def load_narrative_patterns(self) -> Dict[str, List[str]]:
         """Load patterns common in AI-generated creative writing"""
         return {
