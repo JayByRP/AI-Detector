@@ -36,17 +36,17 @@ app.router.add_get('/health', health_check)
 class NarrativeAIDetector:
     def __init__(self):
         try:
-            # Initialize NLP components
+            # Use smaller model and disable GPU if memory is limited
             self.nlp = spacy.load('en_core_web_sm')
             logger.info("Loaded spaCy model successfully")
             
-            # Initialize transformers
-            self.tokenizer = AutoTokenizer.from_pretrained('gpt2')
+            # Use smaller model for sentiment analysis
+            self.tokenizer = AutoTokenizer.from_pretrained('distilgpt2')
             self.sentiment_analyzer = pipeline('sentiment-analysis', 
                                             model='distilbert-base-uncased-finetuned-sst-2-english',
-                                            device=-1)
+                                            device=-1)  # Force CPU usage
             
-            # Initialize NLTK
+            # Minimize NLTK downloads
             nltk.download('punkt', quiet=True)
             nltk.download('stopwords', quiet=True)
             self.stop_words = set(stopwords.words('english'))
@@ -89,7 +89,7 @@ class NarrativeAIDetector:
                 r'\b(delve|testament|dynamic|important\sto\sconsider|dive\sinto|moreover|tapestry|'
                 r'additionally|realm|remember\sthat|vibrant|vital|arguably|certainly|elevate|'
                 r'explore|in\ssummary|it\sis\sworth\snoting|notably|transformative|accordingly|'
-                r'commendable|comprehensive|embrace)\b'
+                r'commendable|comprehensive|embrace|tantalizing|cocooned|murmur)\b'
             ]
         }
 
@@ -328,6 +328,7 @@ class AIDetectorBot(discord.Client):
         except Exception as e:
             logger.error(f"Failed to send alert: {e}")
 
+# Modify the start_webserver function
 async def start_webserver():
     """Start the webserver for health checks"""
     port = int(os.getenv('PORT', 10000))
@@ -336,12 +337,13 @@ async def start_webserver():
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
     logger.info(f"Health check webserver started on port {port}")
+    return site
 
 async def main():
     """Main entry point"""
     try:
         # Start the webserver
-        await start_webserver()
+        site = await start_webserver()
         
         # Start the bot
         bot = AIDetectorBot()
@@ -350,6 +352,10 @@ async def main():
     except Exception as e:
         logger.error(f"Bot initialization failed: {e}", exc_info=True)
         raise
+    finally:
+        # Ensure the webserver is closed
+        if 'site' in locals():
+            await site.stop()
 
 if __name__ == "__main__":
     time.sleep(5)  # Startup delay

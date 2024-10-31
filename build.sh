@@ -11,10 +11,10 @@ apt-get update && apt-get install -y \
     git
 
 # Upgrade pip
-python3 -m pip install --upgrade pip
+python3 -m pip install --upgrade pip setuptools wheel
 
 # Install Python dependencies
-pip install -r requirements.txt
+pip install --no-cache-dir -r requirements.txt
 
 # Download spaCy model
 python3 -m spacy download en_core_web_sm

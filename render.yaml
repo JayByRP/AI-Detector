@@ -2,8 +2,9 @@ services:
   - type: web
     name: narrative-ai-detector
     env: python
+    plan: standard  # Use standard plan to get more memory
     buildCommand: chmod +x build.sh && ./build.sh
-    startCommand: python main.py
+    startCommand: gunicorn --workers 1 --threads 2 -b 0.0.0.0:10000 main:app
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
@@ -19,5 +20,7 @@ services:
         value: 100
       - key: HEARTBEAT_INTERVAL
         value: 300
+      - key: WEB_CONCURRENCY
+        value: 1
     healthCheckPath: /health
     autoDeploy: true
