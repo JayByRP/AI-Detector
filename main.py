@@ -51,13 +51,6 @@ class LightweightNarrativeDetector:
             logger.error(f"Failed to initialize detector: {e}")
             raise
 
-    def compile_patterns(self):
-        """Pre-compile regex patterns for efficiency"""
-        compiled = {}
-        for category, patterns in self.narrative_patterns.items():
-            compiled[category] = [re.compile(pattern, re.IGNORECASE) for pattern in patterns]
-        return compiled
-
     def load_narrative_patterns(self) -> Dict[str, List[str]]:
         """Load patterns common in AI-generated creative writing"""
         return {
@@ -81,68 +74,83 @@ class LightweightNarrativeDetector:
         }
 
     def load_thresholds(self):
-        """Initialize detection thresholds"""
+        """Initialize detection thresholds with more balanced values"""
         self.thresholds = {
-            'pattern_density': 0.1,
-            'repetition_threshold': 0.15,
-            'sentence_complexity': 0.4,
-            'dialogue_ratio': 0.3
+            'pattern_density': 0.05,  # Reduced from 0.1
+            'repetition_threshold': 0.25,  # Increased from 0.15
+            'sentence_complexity': 0.3,  # Reduced from 0.4
+            'dialogue_ratio': 0.4,  # Increased from 0.3
+            'min_length': 50,  # Minimum text length for reliable analysis
+            'max_pattern_score': 0.7  # Cap on pattern matching contribution
         }
 
     def calculate_text_statistics(self, text: str) -> Dict[str, float]:
-        """Calculate basic text statistics"""
+        """Calculate basic text statistics with improved metrics"""
         # Basic tokenization
         doc = self.nlp(text)
-        words = [token.text.lower() for token in doc if not token.is_punct]
+        words = [token.text.lower() for token in doc if not token.is_punct and not token.is_space]
         
         # Word frequency analysis
         word_freq = Counter(words)
         unique_ratio = len(word_freq) / len(words) if words else 0
         
         # Sentence analysis
-        sentences = [sent.text for sent in doc.sents]
+        sentences = [sent.text.strip() for sent in doc.sents if sent.text.strip()]
         avg_sent_length = np.mean([len(sent.split()) for sent in sentences]) if sentences else 0
+        
+        # Calculate vocabulary richness
+        rare_words = sum(1 for word, count in word_freq.items() if count == 1)
+        vocab_richness = rare_words / len(words) if words else 0
         
         return {
             'unique_word_ratio': unique_ratio,
             'avg_sentence_length': avg_sent_length,
-            'word_count': len(words)
+            'word_count': len(words),
+            'vocab_richness': vocab_richness
         }
 
     def detect_patterns(self, text: str) -> Dict[str, float]:
-        """Detect AI patterns efficiently"""
+        """Detect AI patterns with improved scoring"""
         pattern_matches = {}
         text_length = len(text.split())
         
+        if text_length < self.thresholds['min_length']:
+            return {category: 0.0 for category in self.compiled_patterns}
+        
         for category, patterns in self.compiled_patterns.items():
             matches = sum(len(pattern.findall(text)) for pattern in patterns)
-            pattern_matches[category] = matches / text_length if text_length > 0 else 0
+            # Apply diminishing returns to pattern matches
+            score = min(matches / text_length, self.thresholds['max_pattern_score'])
+            pattern_matches[category] = score
             
         return pattern_matches
 
     def analyze_style_markers(self, text: str) -> Dict[str, float]:
-        """Analyze writing style markers"""
+        """Analyze writing style markers with more nuanced metrics"""
         # Dialogue analysis
         dialogue_count = len(re.findall(r'\".*?\"', text))
-        sentences = text.split('.')
+        sentences = [s for s in text.split('.') if s.strip()]
         dialogue_ratio = dialogue_count / len(sentences) if sentences else 0
         
-        # Adjective density
+        # Adjective and adverb density
         doc = self.nlp(text)
-        adj_count = sum(1 for token in doc if token.pos_ == 'ADJ')
-        adj_density = adj_count / len(doc) if len(doc) > 0 else 0
+        adj_adv_count = sum(1 for token in doc if token.pos_ in {'ADJ', 'ADV'})
+        word_count = sum(1 for token in doc if not token.is_punct and not token.is_space)
+        
+        # Calculate normalized densities
+        style_density = adj_adv_count / word_count if word_count > 0 else 0
         
         return {
-            'dialogue_ratio': dialogue_ratio,
-            'adjective_density': adj_density
+            'dialogue_ratio': min(dialogue_ratio, self.thresholds['dialogue_ratio']),
+            'style_density': style_density
         }
 
     def analyze_text(self, text: str) -> Dict[str, float]:
-        """Efficient text analysis"""
+        """Improved text analysis with balanced scoring"""
         try:
             text = text.strip()
-            if not text:
-                return {'ai_score': 0.0}
+            if not text or len(text) < self.thresholds['min_length']:
+                return {'ai_score': 0.0, 'confidence': 0.0}
 
             # Get basic statistics
             stats = self.calculate_text_statistics(text)
@@ -153,26 +161,37 @@ class LightweightNarrativeDetector:
             # Style analysis
             style = self.analyze_style_markers(text)
             
-            # Calculate AI score
+            # Calculate component scores with adjusted weights
             pattern_score = sum(patterns.values()) / len(patterns) if patterns else 0
-            style_score = (style['dialogue_ratio'] + style['adjective_density']) / 2
-            uniqueness_score = stats['unique_word_ratio']
+            style_score = (style['dialogue_ratio'] + style['style_density']) / 2
             
-            # Weighted scoring
+            # Vocabulary richness reduces AI probability
+            vocab_bonus = min(stats['vocab_richness'] * 0.5, 0.3)
+            
+            # Calculate confidence based on text length
+            confidence = min(stats['word_count'] / 500, 1.0)
+            
+            # Weighted scoring with more balanced weights
             weights = {
-                'patterns': 0.4,
-                'style': 0.3,
-                'uniqueness': 0.3
+                'patterns': 0.3,  # Reduced from 0.4
+                'style': 0.2,     # Reduced from 0.3
+                'uniqueness': 0.3,
+                'vocab': 0.2      # New component
             }
             
             ai_score = (
-                pattern_score * weights['patterns'] +
-                style_score * weights['style'] +
-                (1 - uniqueness_score) * weights['uniqueness']
+                (pattern_score * weights['patterns']) +
+                (style_score * weights['style']) +
+                ((1 - stats['unique_word_ratio']) * weights['uniqueness']) -
+                (vocab_bonus * weights['vocab'])
             ) * 100
+
+            # Ensure score stays within 0-100 range
+            ai_score = max(0, min(100, ai_score))
 
             return {
                 'ai_score': ai_score,
+                'confidence': confidence,
                 'statistics': stats,
                 'pattern_analysis': patterns,
                 'style_markers': style
@@ -180,7 +199,7 @@ class LightweightNarrativeDetector:
 
         except Exception as e:
             logger.error(f"Error in text analysis: {e}")
-            return {'ai_score': 0.0}
+            return {'ai_score': 0.0, 'confidence': 0.0}
 
 class AIDetectorBot(discord.Client):
     def __init__(self):
