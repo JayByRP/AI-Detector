@@ -287,6 +287,7 @@ class AIDetectorBot(discord.Client):
 
             results = self.detector.analyze_text(message.content)
             score = results['ai_score']
+            logger.info("AI score: {}".format(score))
             
             if score >= self.alert_threshold:
                 await self.alert_moderators(message, results)
