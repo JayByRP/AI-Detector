@@ -47,8 +47,6 @@ class NarrativeAIDetector:
                                             device=-1)  # Force CPU usage
             
             # Minimize NLTK downloads
-            nltk.download('punkt', quiet=True)
-            nltk.download('stopwords', quiet=True)
             self.stop_words = set(stopwords.words('english'))
             
             # Initialize creative writing patterns
